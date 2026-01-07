@@ -41,6 +41,15 @@ enum Command {
         #[clap(long, default_value = "3", help = "Zstd compression level (1-22)")]
         level: i32,
     },
+
+    /// Print a few sample accounts filtered by owner and exit
+    Debug {
+        #[clap(long, help = "Filter accounts by this owner pubkey")]
+        owner: String,
+
+        #[clap(long, default_value = "5", help = "Number of accounts to print")]
+        count: usize,
+    },
 }
 
 fn main() {
@@ -70,6 +79,11 @@ fn _main() -> Result<(), Box<dyn std::error::Error>> {
             let owner_pubkey = Pubkey::from_str(&owner)
                 .map_err(|e| format!("Invalid owner pubkey '{}': {}", owner, e))?;
             run_compression_benchmark(&mut loader, owner_pubkey, level)?;
+        }
+        Command::Debug { owner, count } => {
+            let owner_pubkey = Pubkey::from_str(&owner)
+                .map_err(|e| format!("Invalid owner pubkey '{}': {}", owner, e))?;
+            run_debug(&mut loader, owner_pubkey, count)?;
         }
     }
 
@@ -117,6 +131,52 @@ fn run_compression_benchmark(
 
     consumer.finish();
 
+    Ok(())
+}
+
+fn run_debug(
+    loader: &mut SupportedLoader,
+    owner_filter: Pubkey,
+    max_count: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use solana_snapshot_etl::append_vec_iter;
+    use std::rc::Rc;
+
+    info!("Looking for accounts owned by: {}", owner_filter);
+
+    let mut found = 0;
+
+    'outer: for append_vec in loader.iter() {
+        let append_vec = append_vec?;
+        for account in append_vec_iter(Rc::new(append_vec)) {
+            let account = account.access().unwrap();
+
+            if account.account_meta.owner != owner_filter {
+                continue;
+            }
+
+            found += 1;
+            println!("\n--- Account {} ---", found);
+            println!("Pubkey:      {}", account.meta.pubkey);
+            println!("Owner:       {}", account.account_meta.owner);
+            println!("Lamports:    {}", account.account_meta.lamports);
+            println!("Data len:    {}", account.data.len());
+            println!("Executable:  {}", account.account_meta.executable);
+            println!("Rent epoch:  {}", account.account_meta.rent_epoch);
+
+            // Print first 64 bytes of data as hex
+            let preview_len = account.data.len().min(64);
+            if preview_len > 0 {
+                println!("Data (first {} bytes): {:02x?}", preview_len, &account.data[..preview_len]);
+            }
+
+            if found >= max_count {
+                break 'outer;
+            }
+        }
+    }
+
+    println!("\nFound {} accounts", found);
     Ok(())
 }
 
