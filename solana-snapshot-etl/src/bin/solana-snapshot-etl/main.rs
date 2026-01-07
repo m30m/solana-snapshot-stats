@@ -49,7 +49,7 @@ fn _main() -> Result<(), Box<dyn std::error::Error>> {
         };
     }
 
-    stats_collector.print_stats();
+    stats_collector.print_stats(None);
 
     println!("Done!");
 
