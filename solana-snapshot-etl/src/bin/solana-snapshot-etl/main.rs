@@ -116,7 +116,6 @@ fn run_compression_benchmark(
     }
 
     consumer.finish();
-    consumer.print_stats();
 
     Ok(())
 }

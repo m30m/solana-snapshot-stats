@@ -17,10 +17,8 @@ impl CountingSink {
         Self { bytes_written: 0 }
     }
 
-    fn take_count(&mut self) -> u64 {
-        let count = self.bytes_written;
-        self.bytes_written = 0;
-        count
+    fn count(&self) -> u64 {
+        self.bytes_written
     }
 }
 
@@ -40,7 +38,6 @@ pub struct BenchmarkStats {
     accounts_count: u64,
     filtered_count: u64,
     total_uncompressed: u64,
-    total_compressed: u64,
 }
 
 impl BenchmarkStats {
@@ -58,13 +55,12 @@ impl BenchmarkStats {
             accounts_count: 0,
             filtered_count: 0,
             total_uncompressed: 0,
-            total_compressed: 0,
         }
     }
 
-    pub fn print_stats(&self) {
+    pub fn print_stats(&self, total_compressed: u64) {
         let ratio = if self.total_uncompressed > 0 {
-            self.total_compressed as f64 / self.total_uncompressed as f64
+            total_compressed as f64 / self.total_uncompressed as f64
         } else {
             0.0
         };
@@ -73,7 +69,7 @@ impl BenchmarkStats {
         println!("Accounts scanned:     {:>15}", self.accounts_count);
         println!("Accounts matched:     {:>15}", self.filtered_count);
         println!("Total uncompressed:   {:>15} bytes", self.total_uncompressed);
-        println!("Total compressed:     {:>15} bytes", self.total_compressed);
+        println!("Total compressed:     {:>15} bytes", total_compressed);
         println!("Compression ratio:    {:>15.4}", ratio);
         println!(
             "Space savings:        {:>14.2}%",
@@ -105,21 +101,28 @@ impl CompressionBenchmarkConsumer {
     }
 
     pub fn print_stats(&self) {
-        self.stats.print_stats();
+        let compressed = self
+            .encoder
+            .as_ref()
+            .map(|e| e.get_ref().count())
+            .unwrap_or(0);
+        self.stats.print_stats(compressed);
     }
 
     pub fn finish(&mut self) {
-        if let Some(encoder) = self.encoder.take() {
+        let compressed = if let Some(encoder) = self.encoder.take() {
             match encoder.finish() {
-                Ok(mut sink) => {
-                    self.stats.total_compressed += sink.take_count();
-                }
+                Ok(sink) => sink.count(),
                 Err(e) => {
                     eprintln!("Error finishing encoder: {}", e);
+                    0
                 }
             }
-        }
+        } else {
+            0
+        };
         self.stats.finish();
+        self.stats.print_stats(compressed);
     }
 }
 
@@ -159,7 +162,7 @@ impl AppendVecConsumer for CompressionBenchmarkConsumer {
 
             // Print stats every million accounts
             if self.stats.accounts_count % 1_000_000 == 0 {
-                self.stats.print_stats();
+                self.stats.print_stats(encoder.get_ref().count());
             }
         }
         Ok(())
