@@ -1,10 +1,10 @@
-use crate::stats::StatsCollector;
+use crate::stats::{SharedStats, StatsConsumerFactory};
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressBarIter, ProgressStyle};
 use log::{error, info};
 use reqwest::blocking::Response;
 use solana_snapshot_etl::archived::ArchiveSnapshotExtractor;
-use solana_snapshot_etl::parallel::AppendVecConsumer;
+use solana_snapshot_etl::parallel::par_iter_append_vecs;
 use solana_snapshot_etl::unpacked::UnpackedSnapshotExtractor;
 use solana_snapshot_etl::{AppendVecIterator, ReadProgressTracking, SnapshotExtractor};
 use std::fs::File;
@@ -37,19 +37,16 @@ fn _main() -> Result<(), Box<dyn std::error::Error>> {
     let mut loader = SupportedLoader::new(&args.source, Box::new(LoadProgressTracking {}))?;
     info!("Processing snapshot: {}", &args.source);
 
-    let mut stats_collector = StatsCollector::new();
-    for append_vec in loader.iter() {
-        match append_vec {
-            Ok(v) => {
-                stats_collector.on_append_vec(v).unwrap_or_else(|error| {
-                    error!("on_append_vec: {:?}", error);
-                });
-            }
-            Err(error) => error!("append_vec: {:?}", error),
-        };
-    }
+    let num_threads = num_cpus::get();
+    info!("Using {} threads", num_threads);
 
-    stats_collector.print_stats(None);
+    let shared_stats = SharedStats::new();
+    let mut factory = StatsConsumerFactory::new(shared_stats.clone());
+
+    par_iter_append_vecs(loader.iter(), &mut factory, num_threads)?;
+
+    shared_stats.finish();
+    shared_stats.print_stats(None);
 
     println!("Done!");
 
