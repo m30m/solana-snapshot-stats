@@ -76,9 +76,15 @@ fn _main() -> Result<(), Box<dyn std::error::Error>> {
             run_stats(&mut loader, num_threads)?;
         }
         Command::CompressionBenchmark { owner, level } => {
-            let owner_pubkey = Pubkey::from_str(&owner)
-                .map_err(|e| format!("Invalid owner pubkey '{}': {}", owner, e))?;
-            run_compression_benchmark(&mut loader, owner_pubkey, level)?;
+            let owner_filter = if owner == "all" {
+                None
+            } else {
+                Some(
+                    Pubkey::from_str(&owner)
+                        .map_err(|e| format!("Invalid owner pubkey '{}': {}", owner, e))?,
+                )
+            };
+            run_compression_benchmark(&mut loader, owner_filter, level)?;
         }
         Command::Debug { owner, count } => {
             let owner_pubkey = Pubkey::from_str(&owner)
@@ -108,12 +114,15 @@ fn run_stats(
 
 fn run_compression_benchmark(
     loader: &mut SupportedLoader,
-    owner_filter: Pubkey,
+    owner_filter: Option<Pubkey>,
     compression_level: i32,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use solana_snapshot_etl::parallel::AppendVecConsumer;
 
-    info!("Filtering accounts by owner: {}", owner_filter);
+    match owner_filter {
+        Some(owner) => info!("Filtering accounts by owner: {}", owner),
+        None => info!("Processing all accounts (no owner filter)"),
+    }
     info!("Compression level: {}", compression_level);
 
     let mut consumer = CompressionBenchmarkConsumer::new(owner_filter, compression_level);

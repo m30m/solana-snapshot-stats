@@ -84,12 +84,12 @@ impl BenchmarkStats {
 
 pub struct CompressionBenchmarkConsumer {
     stats: BenchmarkStats,
-    owner_filter: Pubkey,
+    owner_filter: Option<Pubkey>,
     encoder: Option<Encoder<'static, CountingSink>>,
 }
 
 impl CompressionBenchmarkConsumer {
-    pub fn new(owner_filter: Pubkey, compression_level: i32) -> Self {
+    pub fn new(owner_filter: Option<Pubkey>, compression_level: i32) -> Self {
         let encoder = Encoder::new(CountingSink::new(), compression_level)
             .expect("Failed to create zstd encoder");
 
@@ -140,9 +140,11 @@ impl AppendVecConsumer for CompressionBenchmarkConsumer {
                     .set_position(self.stats.accounts_count);
             }
 
-            // Filter by owner
-            if account.account_meta.owner != self.owner_filter {
-                continue;
+            // Filter by owner (if specified)
+            if let Some(owner_filter) = self.owner_filter {
+                if account.account_meta.owner != owner_filter {
+                    continue;
+                }
             }
 
             self.stats.filtered_count += 1;
