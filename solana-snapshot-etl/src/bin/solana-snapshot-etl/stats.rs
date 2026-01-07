@@ -35,6 +35,9 @@ impl AppendVecConsumer for StatsCollector {
             if self.accounts_count % 1024 == 0 {
                 self.accounts_spinner.set_position(self.accounts_count);
             }
+            if self.accounts_count % 1_000_000 == 0 {
+                self.print_stats();
+            }
         }
         Ok(())
     }
@@ -63,15 +66,24 @@ impl StatsCollector {
         let mut stats: Vec<_> = self.stats_by_owner.iter().collect();
         stats.sort_by(|a, b| b.1.total_size.cmp(&a.1.total_size));
 
-        println!("{:<45} {:>15} {:>20}", "Owner", "Count", "Total Size (bytes)");
-        println!("{}", "-".repeat(80));
+        println!(
+            "{:<45} {:>15} {:>20} {:>15}",
+            "Owner", "Count", "Total Size (bytes)", "Avg Size"
+        );
+        println!("{}", "-".repeat(97));
 
         for (owner, owner_stats) in stats {
+            let avg_size = if owner_stats.count > 0 {
+                owner_stats.total_size / owner_stats.count
+            } else {
+                0
+            };
             println!(
-                "{:<45} {:>15} {:>20}",
+                "{:<45} {:>15} {:>20} {:>15}",
                 owner.to_string(),
                 owner_stats.count,
-                owner_stats.total_size
+                owner_stats.total_size,
+                avg_size
             );
         }
 
