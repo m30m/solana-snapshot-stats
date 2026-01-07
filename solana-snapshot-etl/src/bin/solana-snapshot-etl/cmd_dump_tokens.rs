@@ -1,5 +1,7 @@
 use crate::loader::SupportedLoader;
-use crate::token::{MINT_ACCOUNT_LEN, TOKEN_ACCOUNT_LEN, TOKEN_PROGRAM_ID};
+use crate::token::{
+    ASSOCIATED_TOKEN_PROGRAM_ID, MINT_ACCOUNT_LEN, TOKEN_ACCOUNT_LEN, TOKEN_PROGRAM_ID,
+};
 use duckdb::{params, Connection};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::info;
@@ -11,6 +13,7 @@ use std::str::FromStr;
 
 pub fn run(loader: &mut SupportedLoader, db_path: &str) -> Result<(), Box<dyn std::error::Error>> {
     let token_program = Pubkey::from_str(TOKEN_PROGRAM_ID).unwrap();
+    let ata_program = Pubkey::from_str(ASSOCIATED_TOKEN_PROGRAM_ID).unwrap();
 
     info!("Opening DuckDB database: {}", db_path);
     let conn = Connection::open(db_path)?;
@@ -23,7 +26,8 @@ pub fn run(loader: &mut SupportedLoader, db_path: &str) -> Result<(), Box<dyn st
              pubkey VARCHAR NOT NULL,
              owner VARCHAR NOT NULL,
              mint VARCHAR NOT NULL,
-             amount UBIGINT NOT NULL
+             amount UBIGINT NOT NULL,
+             is_pda BOOLEAN NOT NULL
          );
          CREATE TABLE mints (
              pubkey VARCHAR NOT NULL,
@@ -81,11 +85,23 @@ pub fn run(loader: &mut SupportedLoader, db_path: &str) -> Result<(), Box<dyn st
                 let token_owner = Pubkey::try_from(&account.data[32..64]).unwrap();
                 let amount = u64::from_le_bytes(account.data[64..72].try_into().unwrap());
 
+                // Check if this is the canonical ATA PDA
+                let (expected_ata, _bump) = Pubkey::find_program_address(
+                    &[
+                        token_owner.as_ref(),
+                        token_program.as_ref(),
+                        mint.as_ref(),
+                    ],
+                    &ata_program,
+                );
+                let is_pda = account.meta.pubkey == expected_ata;
+
                 token_appender.append_row(params![
                     account.meta.pubkey.to_string(),
                     token_owner.to_string(),
                     mint.to_string(),
                     amount,
+                    is_pda,
                 ])?;
 
                 token_accounts += 1;
