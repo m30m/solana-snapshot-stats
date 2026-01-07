@@ -45,6 +45,9 @@ impl SharedStats {
         let mut stats: Vec<_> = stats_map.iter().collect();
         stats.sort_by(|a, b| b.1.total_size.cmp(&a.1.total_size));
 
+        let total_count: u64 = stats.iter().map(|(_, s)| s.count).sum();
+        let total_size: u64 = stats.iter().map(|(_, s)| s.total_size).sum();
+
         println!(
             "{:<45} {:>15} {:>20} {:>15}",
             "Owner", "Count", "Total Size (bytes)", "Avg Size"
@@ -66,7 +69,12 @@ impl SharedStats {
             );
         }
 
-        println!("\nTotal accounts processed: {}", accounts_count);
+        println!("{}", "-".repeat(97));
+        println!(
+            "{:<45} {:>15} {:>20}",
+            "TOTAL", total_count, total_size
+        );
+        println!("\nAccounts processed: {}", accounts_count);
     }
 
     pub fn finish(&self) {
