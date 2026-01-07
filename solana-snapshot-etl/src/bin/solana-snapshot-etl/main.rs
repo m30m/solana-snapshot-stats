@@ -50,6 +50,12 @@ enum Command {
         #[clap(long, default_value = "5", help = "Number of accounts to print")]
         count: usize,
     },
+
+    /// Dump all token accounts to a DuckDB database
+    DumpTokens {
+        #[clap(long, help = "Path to the DuckDB database file")]
+        db: String,
+    },
 }
 
 fn main() {
@@ -90,6 +96,9 @@ fn _main() -> Result<(), Box<dyn std::error::Error>> {
             let owner_pubkey = Pubkey::from_str(&owner)
                 .map_err(|e| format!("Invalid owner pubkey '{}': {}", owner, e))?;
             run_debug(&mut loader, owner_pubkey, count)?;
+        }
+        Command::DumpTokens { db } => {
+            run_dump_tokens(&mut loader, &db)?;
         }
     }
 
@@ -195,6 +204,98 @@ fn run_debug(
     }
 
     println!("\nFound {} accounts", found);
+    Ok(())
+}
+
+fn run_dump_tokens(
+    loader: &mut SupportedLoader,
+    db_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use duckdb::{params, Connection};
+    use indicatif::{ProgressBar, ProgressStyle};
+    use solana_snapshot_etl::append_vec_iter;
+    use std::rc::Rc;
+
+    let token_program = Pubkey::from_str(TOKEN_PROGRAM_ID).unwrap();
+
+    info!("Opening DuckDB database: {}", db_path);
+    let conn = Connection::open(db_path)?;
+
+    // Create table
+    conn.execute_batch(
+        "DROP TABLE IF EXISTS token_accounts;
+         CREATE TABLE token_accounts (
+             pubkey VARCHAR NOT NULL,
+             owner VARCHAR NOT NULL,
+             mint VARCHAR NOT NULL,
+             amount UBIGINT NOT NULL
+         );",
+    )?;
+
+    let mut appender = conn.appender("token_accounts")?;
+
+    let spinner_style = ProgressStyle::with_template(
+        "{prefix:>10.bold.dim} {spinner} rate={per_sec}/s total={human_pos}",
+    )
+    .unwrap();
+    let spinner = ProgressBar::new_spinner()
+        .with_style(spinner_style)
+        .with_prefix("tokens");
+
+    let mut total_accounts: u64 = 0;
+    let mut token_accounts: u64 = 0;
+
+    for append_vec in loader.iter() {
+        let append_vec = append_vec?;
+        for account in append_vec_iter(Rc::new(append_vec)) {
+            let account = account.access().unwrap();
+            total_accounts += 1;
+
+            if total_accounts % 10000 == 0 {
+                spinner.set_position(token_accounts);
+            }
+
+            // Filter for token accounts
+            if account.account_meta.owner != token_program {
+                continue;
+            }
+            if account.data.len() != TOKEN_ACCOUNT_LEN {
+                continue;
+            }
+
+            // Parse token account
+            let mint = Pubkey::try_from(&account.data[0..32]).unwrap();
+            let token_owner = Pubkey::try_from(&account.data[32..64]).unwrap();
+            let amount = u64::from_le_bytes(account.data[64..72].try_into().unwrap());
+
+            appender.append_row(params![
+                account.meta.pubkey.to_string(),
+                token_owner.to_string(),
+                mint.to_string(),
+                amount,
+            ])?;
+
+            token_accounts += 1;
+
+            // Flush every million records
+            if token_accounts % 1_000_000 == 0 {
+                appender.flush()?;
+                info!(
+                    "Flushed {} token accounts ({} total scanned)",
+                    token_accounts, total_accounts
+                );
+            }
+        }
+    }
+
+    appender.flush()?;
+    spinner.finish();
+
+    info!(
+        "Dumped {} token accounts from {} total accounts",
+        token_accounts, total_accounts
+    );
+
     Ok(())
 }
 
