@@ -1,8 +1,10 @@
+use crate::compression_benchmark::CompressionBenchmarkConsumer;
 use crate::stats::{SharedStats, StatsConsumerFactory};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use indicatif::{ProgressBar, ProgressBarIter, ProgressStyle};
 use log::{error, info};
 use reqwest::blocking::Response;
+use solana_sdk::pubkey::Pubkey;
 use solana_snapshot_etl::archived::ArchiveSnapshotExtractor;
 use solana_snapshot_etl::parallel::par_iter_append_vecs;
 use solana_snapshot_etl::unpacked::UnpackedSnapshotExtractor;
@@ -10,7 +12,9 @@ use solana_snapshot_etl::{AppendVecIterator, ReadProgressTracking, SnapshotExtra
 use std::fs::File;
 use std::io::{IoSliceMut, Read};
 use std::path::Path;
+use std::str::FromStr;
 
+mod compression_benchmark;
 mod mpl_metadata;
 mod stats;
 
@@ -19,6 +23,24 @@ mod stats;
 struct Args {
     #[clap(help = "Snapshot source (unpacked snapshot, archive file, or HTTP link)")]
     source: String,
+
+    #[clap(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Collect and display account statistics by owner
+    Stats,
+
+    /// Benchmark zstd compression for accounts owned by a specific program
+    CompressionBenchmark {
+        #[clap(long, help = "Filter accounts by this owner pubkey")]
+        owner: String,
+
+        #[clap(long, default_value = "3", help = "Zstd compression level (1-22)")]
+        level: i32,
+    },
 }
 
 fn main() {
@@ -40,6 +62,25 @@ fn _main() -> Result<(), Box<dyn std::error::Error>> {
     let num_threads = num_cpus::get() / 2;
     info!("Using {} threads", num_threads);
 
+    match args.command {
+        Command::Stats => {
+            run_stats(&mut loader, num_threads)?;
+        }
+        Command::CompressionBenchmark { owner, level } => {
+            let owner_pubkey = Pubkey::from_str(&owner)
+                .map_err(|e| format!("Invalid owner pubkey '{}': {}", owner, e))?;
+            run_compression_benchmark(&mut loader, owner_pubkey, level)?;
+        }
+    }
+
+    println!("Done!");
+    Ok(())
+}
+
+fn run_stats(
+    loader: &mut SupportedLoader,
+    num_threads: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
     let shared_stats = SharedStats::new();
     let mut factory = StatsConsumerFactory::new(shared_stats.clone());
 
@@ -48,7 +89,34 @@ fn _main() -> Result<(), Box<dyn std::error::Error>> {
     shared_stats.finish();
     shared_stats.print_stats(None);
 
-    println!("Done!");
+    Ok(())
+}
+
+fn run_compression_benchmark(
+    loader: &mut SupportedLoader,
+    owner_filter: Pubkey,
+    compression_level: i32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use solana_snapshot_etl::parallel::AppendVecConsumer;
+
+    info!("Filtering accounts by owner: {}", owner_filter);
+    info!("Compression level: {}", compression_level);
+
+    let mut consumer = CompressionBenchmarkConsumer::new(owner_filter, compression_level);
+
+    for append_vec in loader.iter() {
+        match append_vec {
+            Ok(v) => {
+                consumer.on_append_vec(v).unwrap_or_else(|err| {
+                    error!("on_append_vec: {:?}", err);
+                });
+            }
+            Err(err) => error!("append_vec: {:?}", err),
+        }
+    }
+
+    consumer.finish();
+    consumer.print_stats();
 
     Ok(())
 }
