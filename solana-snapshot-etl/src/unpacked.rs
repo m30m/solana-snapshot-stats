@@ -79,7 +79,7 @@ impl UnpackedSnapshotExtractor {
     pub fn unboxed_iter(&self) -> impl Iterator<Item = Result<AppendVec>> + '_ {
         std::iter::once(self.iter_streams())
             .flatten_ok()
-            .flatten_ok()
+            .flatten()
     }
 
     fn iter_streams(&self) -> Result<impl Iterator<Item = Result<AppendVec>> + '_> {
