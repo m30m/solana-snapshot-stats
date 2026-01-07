@@ -48,25 +48,16 @@ standalone = [
     "csv",
     "env_logger",
     "indicatif",
-    "libloading",
     "num_cpus",
     "parallel",
     "reqwest",
     "rusqlite",
     "serde_json",
-    "solana-geyser-plugin-interface",
     "solana-program",
     "spl-token",
     "json5",
-]
-opcode_stats = [
-    "solana_rbpf",
 ]
 
 [[bin]]
 name = "solana-snapshot-etl"
 required-features = ["standalone"]
-
-[[bin]]
-name = "solana-opcode-stats"
-required-features = ["opcode_stats"]

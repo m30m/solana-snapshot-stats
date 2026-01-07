@@ -1,29 +1,24 @@
-use crate::geyser::GeyserDumper;
+use crate::stats::StatsCollector;
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressBarIter, ProgressStyle};
-use libloading::{Library, Symbol};
 use log::{error, info};
 use reqwest::blocking::Response;
-use serde::Deserialize;
-use solana_geyser_plugin_interface::geyser_plugin_interface::GeyserPlugin;
 use solana_snapshot_etl::archived::ArchiveSnapshotExtractor;
 use solana_snapshot_etl::parallel::AppendVecConsumer;
 use solana_snapshot_etl::unpacked::UnpackedSnapshotExtractor;
 use solana_snapshot_etl::{AppendVecIterator, ReadProgressTracking, SnapshotExtractor};
 use std::fs::File;
 use std::io::{IoSliceMut, Read};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-mod geyser;
 mod mpl_metadata;
+mod stats;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
     #[clap(help = "Snapshot source (unpacked snapshot, archive file, or HTTP link)")]
     source: String,
-    #[clap(long, help = "Load Geyser plugin from given config file")]
-    geyser: String,
 }
 
 fn main() {
@@ -38,29 +33,15 @@ fn main() {
 
 fn _main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
-    // let args = Args {
-    // source: String::from("~/solana/incremental-snapshot-179082967-179084967-A5JfbbCiLfrqrxuCQ3Dtt7zpxrUkQ5eVtimqoDjvXwnR.tar.zst"),
-    // geyser: String::from("~/workspace/solana/solana-snapshot-etl-tools/solana-snapshot-etl/geyser-conf.json"),
-    // };
 
     let mut loader = SupportedLoader::new(&args.source, Box::new(LoadProgressTracking {}))?;
-    info!("Dumping to Geyser plugin: {}", &args.geyser);
+    info!("Processing snapshot: {}", &args.source);
 
-    let cfg = Config::read(&args.geyser)
-        .map_err(|e| format!("Config error: {}", e.to_string()))
-        .unwrap();
-    let plugin = unsafe { load_plugin(&args.geyser, cfg.libpath)? };
-
-    assert!(
-        plugin.account_data_notifications_enabled(),
-        "Geyser plugin does not accept account data notifications"
-    );
-
-    let mut dumper = GeyserDumper::new(plugin, cfg.throttle_nanos);
+    let mut stats_collector = StatsCollector::new();
     for append_vec in loader.iter() {
         match append_vec {
             Ok(v) => {
-                dumper.on_append_vec(v).unwrap_or_else(|error| {
+                stats_collector.on_append_vec(v).unwrap_or_else(|error| {
                     error!("on_append_vec: {:?}", error);
                 });
             }
@@ -68,61 +49,11 @@ fn _main() -> Result<(), Box<dyn std::error::Error>> {
         };
     }
 
+    stats_collector.print_stats();
+
     println!("Done!");
 
     Ok(())
-}
-
-#[derive(Deserialize)]
-pub struct Config {
-    pub libpath: String,
-    pub throttle_nanos: u64,
-}
-
-impl Config {
-    pub fn read(path: &str) -> Result<Self, std::io::Error> {
-        let data = std::fs::read_to_string(path)?;
-        let c: Config = serde_json::from_str(data.as_str())?;
-
-        Ok(c)
-    }
-}
-
-/// # Safety
-///
-/// This function loads the dynamically linked library specified in the config file.
-///
-/// Causes memory corruption/UB on mismatching rustc or Solana versions, or if you look at the wrong way.
-pub unsafe fn load_plugin(
-    config_file: &str,
-    libpath: String,
-) -> Result<Box<dyn GeyserPlugin>, Box<dyn std::error::Error>> {
-    println!("{}", libpath);
-    let config_path = PathBuf::from(config_file);
-    let mut libpath = PathBuf::from(libpath.as_str());
-    if libpath.is_relative() {
-        let config_dir = config_path
-            .parent()
-            .expect("failed to resolve parent of Geyser config file");
-        libpath = config_dir.join(libpath);
-    }
-
-    load_plugin_inner(&libpath, &config_path.to_string_lossy())
-}
-
-unsafe fn load_plugin_inner(
-    libpath: &Path,
-    config_file: &str,
-) -> Result<Box<dyn GeyserPlugin>, Box<dyn std::error::Error>> {
-    type PluginConstructor = unsafe fn() -> *mut dyn GeyserPlugin;
-    // Load library and leak, as we never want to unload it.
-    let lib = Box::leak(Box::new(Library::new(libpath)?));
-    let constructor: Symbol<PluginConstructor> = lib.get(b"_create_plugin")?;
-    // Unsafe call down to library.
-    let plugin_raw = constructor();
-    let mut plugin = Box::from_raw(plugin_raw);
-    plugin.on_load(config_file)?;
-    Ok(plugin)
 }
 
 struct LoadProgressTracking {}
