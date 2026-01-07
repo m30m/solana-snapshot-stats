@@ -96,7 +96,7 @@ impl AppendVecConsumerFactory for StatsConsumerFactory {
     }
 }
 
-const FLUSH_INTERVAL: u64 = 1_000_000;
+const FLUSH_INTERVAL: u64 = 10_000_000;
 
 pub struct StatsConsumer {
     shared: Arc<SharedStats>,

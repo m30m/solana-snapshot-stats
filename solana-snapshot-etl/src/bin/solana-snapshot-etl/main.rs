@@ -37,7 +37,7 @@ fn _main() -> Result<(), Box<dyn std::error::Error>> {
     let mut loader = SupportedLoader::new(&args.source, Box::new(LoadProgressTracking {}))?;
     info!("Processing snapshot: {}", &args.source);
 
-    let num_threads = num_cpus::get();
+    let num_threads = num_cpus::get() / 2;
     info!("Using {} threads", num_threads);
 
     let shared_stats = SharedStats::new();
