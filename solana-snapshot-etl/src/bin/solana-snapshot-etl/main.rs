@@ -59,6 +59,9 @@ enum Command {
     CustomCompress {
         #[clap(long, help = "Path to output file")]
         output: String,
+
+        #[clap(long, help = "Maximum number of accounts to process")]
+        max_accounts: Option<usize>,
     },
 }
 
@@ -104,8 +107,8 @@ fn _main() -> Result<(), Box<dyn std::error::Error>> {
         Command::DumpTokens { db } => {
             cmd_dump_tokens::run(&mut loader, &db)?;
         }
-        Command::CustomCompress { output } => {
-            cmd_custom_compress::run(&mut loader, &output)?;
+        Command::CustomCompress { output, max_accounts } => {
+            cmd_custom_compress::run(&mut loader, &output, max_accounts)?;
         }
     }
 

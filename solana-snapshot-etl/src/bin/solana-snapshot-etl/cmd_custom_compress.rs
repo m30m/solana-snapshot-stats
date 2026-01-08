@@ -12,6 +12,7 @@ use std::str::FromStr;
 pub fn run(
     loader: &mut SupportedLoader,
     output_path: &str,
+    max_accounts: Option<usize>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let token_program = Pubkey::from_str(TOKEN_PROGRAM_ID).unwrap();
 
@@ -26,16 +27,16 @@ pub fn run(
         .with_prefix("compress");
 
     let mut total_accounts: u64 = 0;
-    let mut accepted_accounts: u64 = 0;
+    let mut accepted_accounts: usize = 0;
 
-    for append_vec in loader.iter() {
+    'outer: for append_vec in loader.iter() {
         let append_vec = append_vec?;
         for account in append_vec_iter(Rc::new(append_vec)) {
             let account = account.access().unwrap();
             total_accounts += 1;
 
             if total_accounts % 10000 == 0 {
-                spinner.set_position(accepted_accounts);
+                spinner.set_position(accepted_accounts as u64);
             }
 
             // Filter for token program accounts
@@ -47,8 +48,12 @@ pub fn run(
             if compressor.add(&account) {
                 accepted_accounts += 1;
             }
-            if accepted_accounts > 10_000_000 {
-                break;
+
+            // Check if we've reached the max
+            if let Some(max) = max_accounts {
+                if accepted_accounts >= max {
+                    break 'outer;
+                }
             }
         }
     }
