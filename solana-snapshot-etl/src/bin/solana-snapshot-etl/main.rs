@@ -5,10 +5,12 @@ use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 
 mod cmd_compression_benchmark;
+mod cmd_custom_compress;
 mod cmd_debug;
 mod cmd_dump_tokens;
 mod cmd_stats;
 mod compression_benchmark;
+mod compressor;
 mod loader;
 mod mpl_metadata;
 mod stats;
@@ -51,6 +53,12 @@ enum Command {
     DumpTokens {
         #[clap(long, help = "Path to the DuckDB database file")]
         db: String,
+    },
+
+    /// Compress token accounts using custom compressor
+    CustomCompress {
+        #[clap(long, help = "Path to output file")]
+        output: String,
     },
 }
 
@@ -95,6 +103,9 @@ fn _main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::DumpTokens { db } => {
             cmd_dump_tokens::run(&mut loader, &db)?;
+        }
+        Command::CustomCompress { output } => {
+            cmd_custom_compress::run(&mut loader, &output)?;
         }
     }
 
