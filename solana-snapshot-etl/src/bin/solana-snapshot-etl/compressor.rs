@@ -164,19 +164,36 @@ impl Compressor for TokenAccountCompressor {
     }
 
     fn load<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
-        let file = File::open(path)?;
+        let path = path.as_ref();
+        let path_str = path.to_string_lossy();
+
+        // Load pubkey_list
+        let pubkey_path = format!("{}.pubkeys", path_str);
+        let file = File::open(&pubkey_path)?;
         let mut reader = BufReader::new(file);
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes)?;
-        let state: TokenAccountCompressorState = wincode::deserialize(&bytes)?;
-        let pubkey_position: HashMap<PubkeyBytes, usize> = state
-            .pubkey_list
+        let pubkey_list: Vec<PubkeyBytes> = wincode::deserialize(&bytes)?;
+
+        // Load accounts
+        let accounts_path = format!("{}.accounts", path_str);
+        let file = File::open(&accounts_path)?;
+        let mut reader = BufReader::new(file);
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes)?;
+        let accounts: Vec<TokenAccountDataCompressed> = wincode::deserialize(&bytes)?;
+
+        let pubkey_position: HashMap<PubkeyBytes, usize> = pubkey_list
             .iter()
             .enumerate()
             .map(|(i, pk)| (*pk, i))
             .collect();
+
         Ok(Self {
-            state,
+            state: TokenAccountCompressorState {
+                pubkey_list,
+                accounts,
+            },
             pubkey_position,
             token_program: Pubkey::from_str(TOKEN_PROGRAM_ID).unwrap(),
             ata_program: Pubkey::from_str(ASSOCIATED_TOKEN_PROGRAM_ID).unwrap(),
@@ -184,10 +201,26 @@ impl Compressor for TokenAccountCompressor {
     }
 
     fn persist<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn std::error::Error>> {
-        let file = File::create(path)?;
+        let path = path.as_ref();
+        let path_str = path.to_string_lossy();
+
+        // Persist pubkey_list
+        let pubkey_path = format!("{}.pubkeys", path_str);
+        let file = File::create(&pubkey_path)?;
         let mut writer = BufWriter::new(file);
-        let bytes = wincode::serialize(&self.state)?;
+        let bytes = wincode::serialize(&self.state.pubkey_list)?;
         writer.write_all(&bytes)?;
+        drop(writer);
+
+        // Persist accounts
+        let accounts_path = format!("{}.accounts", path_str);
+        let file = File::create(&accounts_path)?;
+        let mut writer = BufWriter::new(file);
+        let bytes = wincode::serialize(&self.state.accounts)?;
+        writer.write_all(&bytes)?;
+
+        println!("pubkey_list size: {}", self.state.pubkey_list.len());
+
         Ok(())
     }
 
